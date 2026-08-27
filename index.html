@@ -625,6 +625,7 @@ function renderTerm(){
 
   h+=`<div class="sec-title">Notes</div>
   <textarea class="notes-ta" id="notesTA" placeholder="Notes for this event…" ${isLocked?'readonly':''}>${esc(ev.notes||'')}</textarea>
+  <button onclick="printEvent(${curTerm},${curEvt})" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;padding:13px;border-radius:var(--radius);border:1px solid rgba(79,142,247,.35);background:rgba(79,142,247,.1);color:var(--accent);font-size:14px;font-weight:700;cursor:pointer;font-family:var(--font);transition:opacity .2s">🖨 Print This Event</button>
   <div class="danger-zone">
     <div class="danger-zone-title">⚠ Danger Zone</div>
     <div class="danger-row">
@@ -922,75 +923,6 @@ function exportPDF(){
     html+=`</tbody><tfoot><tr><td>Total</td>${activeTerms.map(x=>`<td>${fmt(termTots[x.ti])}</td>`).join('')}<td>${fmt(tot)}</td></tr></tfoot></table>`;
   }
 
-  // Table 3: Full item-level breakdown per event per term
-  activeTerms.forEach(({t:term,ti})=>{
-    html+=`<div class="p-section" style="page-break-before:auto">Term ${ti+1} — Full Item Breakdown</div>`;
-
-    term.forEach(ev=>{
-      const evTotal=evSum(ev);
-      // Event sub-header
-      html+=`<div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0 4px;padding:6px 8px;background:#f0f2f8;border-left:4px solid #1a1f2e;border-radius:0 4px 4px 0">
-        <div style="font-weight:800;font-size:12px;color:#1a1f2e">${ev.name||'(unnamed)'}</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="p-badge pb-${ev.status}">${STATUS_LABELS[ev.status]}</span>
-          <span style="font-weight:800;font-size:12px;color:#1a1f2e">${fmt(evTotal)}</span>
-        </div>
-      </div>`;
-
-      // One table per event showing all categories and their items
-      let hasItems=false;
-      CATS.forEach((cat,ci)=>{
-        const items=ev.categories[cat].filter(i=>i.name||i.amount);
-        if(!items.length)return;
-        hasItems=true;
-        const subTotal=catSum(ev.categories[cat]);
-        html+=`<table class="p-table" style="margin-bottom:6px">
-          <thead><tr>
-            <th style="text-align:left;width:60%"><span class="p-cat-dot" style="background:${CAT_COLORS[ci]}"></span>${CSHORT[ci]}</th>
-            <th>Amount (BND)</th>
-          </tr></thead>
-          <tbody>`;
-        items.forEach(item=>{
-          html+=`<tr>
-            <td style="padding-left:16px">${item.name||'—'}</td>
-            <td>${fmt(iAmt(item))}</td>
-          </tr>`;
-        });
-        html+=`</tbody>
-          <tfoot><tr>
-            <td style="font-weight:700">Subtotal — ${CSHORT[ci]}</td>
-            <td style="font-weight:700">${fmt(subTotal)}</td>
-          </tr></tfoot>
-        </table>`;
-      });
-
-      if(!hasItems){
-        html+=`<p style="font-size:10px;color:#999;padding:4px 8px;font-style:italic">No items entered for this event.</p>`;
-      }
-
-      // Event notes
-      if(ev.notes){
-        html+=`<div class="p-notes" style="margin-bottom:8px">Notes: ${ev.notes}</div>`;
-      }
-
-      // Event total row
-      html+=`<table class="p-table" style="margin-bottom:14px">
-        <tfoot><tr>
-          <td style="font-weight:800;font-size:12px">Event Total — ${ev.name||'(unnamed)'}</td>
-          <td style="font-weight:800;font-size:12px">${fmt(evTotal)}</td>
-        </tr></tfoot>
-      </table>`;
-    });
-
-    // Term total summary row
-    html+=`<table class="p-table" style="margin-bottom:18px">
-      <tfoot><tr>
-        <td style="font-weight:800;font-size:13px;background:#1a1f2e!important;color:#fff!important">Term ${ti+1} Grand Total</td>
-        <td style="font-weight:800;font-size:13px;background:#1a1f2e!important;color:#fff!important">${fmt(termTots[ti])}</td>
-      </tr></tfoot>
-    </table>`;
-  });
-
   // ── SIGNATURE BLOCK ───────────────────────────────────────────────────────
   html+=`<div class="p-sig-section">
     <div class="p-sig-title">Authorisation &amp; Approval — ${reportTitle} ${S.year}</div>
@@ -1011,6 +943,113 @@ function exportPDF(){
   },120);
 }
 
+
+// ── PRINT SINGLE EVENT ────────────────────────────────────────────────────────
+function printEvent(ti, ei){
+  const ev=S.terms[ti][ei];
+  if(!ev)return;
+  const pa=document.getElementById('printArea');
+  const now=new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});
+  const reportTitle=S.customTitle||'BJS Event Budget Forecast';
+  const evTotal=evSum(ev);
+  const bud=S.budget;
+
+  function sigBox(role,roleColor,sig){
+    const hasName=sig&&sig.name;
+    return`<div class="p-sig-box">
+      <div class="p-sig-role" style="color:${roleColor}">${role}</div>
+      <div class="p-sig-line"></div>
+      <div class="p-sig-name">${hasName?`(${sig.name})`:'( NAME )'}</div>
+      <div class="p-sig-pos">${sig&&sig.position?sig.position:'Position'}</div>
+      <div class="p-sig-label">${sig&&sig.place?sig.place:'Bright Jigsaw School'}</div>
+      <div class="p-sig-date">Date: _______________</div>
+    </div>`;
+  }
+
+  let html=`<div class="p-header">
+    <div class="p-header-left">
+      <img class="p-logo" src="${SCHOOL_LOGO}" alt="BJS Logo">
+      <div class="p-title-wrap">
+        <div class="p-title">${reportTitle}</div>
+        <div class="p-sub">Term ${ti+1} &nbsp;·&nbsp; Budget Year: <strong>${S.year}</strong> &nbsp;·&nbsp; Budget Limit: ${fmt(bud)}</div>
+      </div>
+    </div>
+    <div class="p-meta">Generated: ${now}<br>Bright Jigsaw School</div>
+  </div>`;
+
+  // Event header strip
+  html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#1a1f2e;border-radius:6px;margin-bottom:14px">
+    <div>
+      <div style="font-size:16px;font-weight:900;color:#fff">${ev.name||'(unnamed)'}</div>
+      <div style="font-size:10px;color:#aab;margin-top:2px">Term ${ti+1} &nbsp;·&nbsp; ${S.year}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="p-badge pb-${ev.status}" style="font-size:10px">${STATUS_LABELS[ev.status]}</span>
+      <span style="font-size:18px;font-weight:900;color:#fff">${fmt(evTotal)}</span>
+    </div>
+  </div>`;
+
+  // Category item tables
+  let hasAnyItems=false;
+  CATS.forEach((cat,ci)=>{
+    const items=ev.categories[cat].filter(i=>i.name||i.amount);
+    if(!items.length)return;
+    hasAnyItems=true;
+    const subTotal=catSum(ev.categories[cat]);
+    html+=`<table class="p-table" style="margin-bottom:10px">
+      <thead><tr>
+        <th style="text-align:left;width:65%"><span class="p-cat-dot" style="background:${CAT_COLORS[ci]}"></span>${CSHORT[ci]}</th>
+        <th>Amount (BND)</th>
+      </tr></thead>
+      <tbody>`;
+    items.forEach(item=>{
+      html+=`<tr>
+        <td style="padding-left:14px">${item.name||'—'}</td>
+        <td>${fmt(iAmt(item))}</td>
+      </tr>`;
+    });
+    html+=`</tbody>
+      <tfoot><tr>
+        <td style="font-weight:700">Subtotal — ${CSHORT[ci]}</td>
+        <td style="font-weight:700">${fmt(subTotal)}</td>
+      </tr></tfoot>
+    </table>`;
+  });
+
+  if(!hasAnyItems){
+    html+=`<p style="font-size:11px;color:#999;padding:8px;font-style:italic;text-align:center">No budget items entered for this event.</p>`;
+  }
+
+  if(ev.notes){
+    html+=`<div class="p-notes" style="margin:10px 0 14px">Notes: ${ev.notes}</div>`;
+  }
+
+  // Event grand total
+  html+=`<table class="p-table" style="margin-bottom:20px">
+    <tfoot><tr>
+      <td style="font-weight:800;font-size:13px">Event Total — ${ev.name||'(unnamed)'}</td>
+      <td style="font-weight:800;font-size:13px">${fmt(evTotal)}</td>
+    </tr></tfoot>
+  </table>`;
+
+  // Signature block
+  html+=`<div class="p-sig-section">
+    <div class="p-sig-title">Authorisation &amp; Approval — ${ev.name||'Event'}, Term ${ti+1} (${S.year})</div>
+    <div class="p-sig-row">
+      ${sigBox('Prepared &amp; Confirmed by','#1a4a8a',S.sigPrepared)}
+      ${sigBox('Verified by','#1a7a50',S.sigVerified)}
+      ${sigBox('Approved by','#7a4a00',S.sigApproved)}
+    </div>
+  </div>`;
+
+  pa.innerHTML=html;
+  const origTitle=document.title;
+  document.title='';
+  setTimeout(()=>{
+    window.print();
+    setTimeout(()=>{document.title=origTitle;},500);
+  },120);
+}
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function showToast(msg){
   const t=document.getElementById('toast');
